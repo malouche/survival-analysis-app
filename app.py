@@ -1,179 +1,389 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from lifelines import KaplanMeierFitter, NelsonAalenFitter
 import plotly.graph_objects as go
-import plotnine as gg
+from lifelines import KaplanMeierFitter, NelsonAalenFitter
+import base64
 
 # Configure the page
 st.set_page_config(
-    page_title="Survival Analysis App",
-    layout="wide"
+    page_title="Survival Analysis",
+    layout="wide",
+    page_icon="📊"
 )
 
 def local_css():
-    """Define custom CSS styles"""
-    css = """
-    <style>
-        div[data-testid="stDataFrame"] div[data-testid="stTable"] {
-            width: 100%;
-            padding: 1rem;
-            margin: 1rem 0;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-        }
-        
-        div[data-testid="stSidebar"] {
-            background-color: #f8f9fa;
-            padding: 2rem;
-        }
-        
-        div.about-section {
-            background-color: #f8f9fa;
-            padding: 2rem;
-            border-radius: 8px;
-            margin: 2rem 0;
-        }
-        
-        div.contact-form {
-            background-color: #fff;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        footer {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 1rem;
-            background-color: #f8f9fa;
-            text-align: center;
-        }
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
+    st.markdown("""
+        <style>
+            /* Container styling */
+            .block-container {
+                padding: 2rem;
+            }
+            
+            /* Sidebar styling */
+            .css-1d391kg {
+                padding: 2rem 1rem;
+            }
+            
+            /* Explanation box */
+            div[data-testid="stExpander"] {
+                background-color: #f8f9fa;
+                border-left: 5px solid #1f77b4;
+                padding: 1rem;
+                margin: 1rem 0;
+            }
+            
+            /* Headers */
+            h1, h2, h3 {
+                color: #2C3E50 !important;
+            }
+            
+            /* DataFrame styling */
+            div[data-testid="stDataFrame"] > div {
+                border: 1px solid #ddd;
+                border-radius: 0.5rem;
+                padding: 1rem;
+            }
+            
+            /* Button styling */
+            div[data-testid="stButton"] button {
+                background-color: #1f77b4;
+                color: white;
+                width: 100%;
+                padding: 0.5rem;
+                margin: 1rem 0;
+            }
+            
+            div[data-testid="stButton"] button:hover {
+                background-color: #1967a9;
+            }
+            
+            /* Footer styling */
+            .footer {
+                position: fixed;
+                left: 0;
+                bottom: 0;
+                width: 100%;
+                background-color: #f8f9fa;
+                padding: 1rem;
+                text-align: center;
+                font-size: 0.8rem;
+                color: #666;
+            }
+            
+            /* Tooltip */
+            .tooltip {
+                position: relative;
+                display: inline-block;
+                border-bottom: 1px dotted black;
+            }
+            
+            .tooltip .tooltiptext {
+                visibility: hidden;
+                width: 200px;
+                background-color: black;
+                color: #fff;
+                text-align: center;
+                border-radius: 6px;
+                padding: 5px;
+                position: absolute;
+                z-index: 1;
+                bottom: 125%;
+                left: 50%;
+                margin-left: -100px;
+                opacity: 0;
+                transition: opacity 0.3s;
+            }
+            
+            .tooltip:hover .tooltiptext {
+                visibility: visible;
+                opacity: 1;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
-# Rest of the plotting functions remain the same...
-# TODO: Implement plotting and helper functions
+def validate_data(df):
+    """Validate the uploaded dataset"""
+    required_columns = ['time', 'censored']
+    
+    # Check for required columns
+    if not all(col in df.columns for col in required_columns):
+        return False, "Dataset must contain 'time' and 'censored' columns"
+    
+    # Check data types
+    if not pd.to_numeric(df['time'], errors='coerce').notnull().all():
+        return False, "'time' column must contain numeric values"
+    
+    if not df['censored'].isin([0, 1]).all():
+        return False, "'censored' column must contain only 0 or 1"
+    
+    return True, "Data validation successful"
+
+def plot_survival_curve(df, method='km', ci_method='plain', alpha=0.05):
+    """Plot survival curve using the selected method"""
+    if method == 'km':
+        kmf = KaplanMeierFitter()
+        kmf.fit(df['time'], df['censored'], alpha=alpha)
+        
+        fig = go.Figure()
+        
+        # Add survival curve
+        fig.add_trace(go.Scatter(
+            x=kmf.timeline,
+            y=kmf.survival_function_.values.flatten(),
+            mode='lines',
+            name='Survival Estimate',
+            line=dict(color='#1f77b4', width=2)
+        ))
+        
+        # Add confidence intervals
+        fig.add_trace(go.Scatter(
+            x=kmf.timeline,
+            y=kmf.confidence_interval_.values[:, 0],
+            mode='lines',
+            line=dict(width=0),
+            showlegend=False,
+            name='Lower CI'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=kmf.timeline,
+            y=kmf.confidence_interval_.values[:, 1],
+            mode='lines',
+            fill='tonexty',
+            line=dict(width=0),
+            name=f'{int((1-alpha)*100)}% CI'
+        ))
+        
+        # Add censored points
+        censored_times = df[df['censored'] == 0]['time']
+        if len(censored_times) > 0:
+            censored_survival = [kmf.survival_function_.loc[kmf.timeline <= t].iloc[-1] 
+                               if len(kmf.survival_function_.loc[kmf.timeline <= t]) > 0 
+                               else 1.0 
+                               for t in censored_times]
+            
+            fig.add_trace(go.Scatter(
+                x=censored_times,
+                y=censored_survival,
+                mode='markers',
+                name='Censored',
+                marker=dict(
+                    symbol='plus',
+                    size=8,
+                    color='black',
+                    line=dict(width=2)
+                )
+            ))
+        
+    else:  # Nelson-Aalen
+        naf = NelsonAalenFitter()
+        naf.fit(df['time'], df['censored'], alpha=alpha)
+        
+        fig = go.Figure()
+        
+        # Add cumulative hazard curve
+        fig.add_trace(go.Scatter(
+            x=naf.timeline,
+            y=naf.cumulative_hazard_.values.flatten(),
+            mode='lines',
+            name='Cumulative Hazard',
+            line=dict(color='#1f77b4', width=2)
+        ))
+        
+        # Add confidence intervals
+        fig.add_trace(go.Scatter(
+            x=naf.timeline,
+            y=naf.confidence_interval_.values[:, 0],
+            mode='lines',
+            line=dict(width=0),
+            showlegend=False
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=naf.timeline,
+            y=naf.confidence_interval_.values[:, 1],
+            mode='lines',
+            fill='tonexty',
+            line=dict(width=0),
+            name=f'{int((1-alpha)*100)}% CI'
+        ))
+    
+    # Update layout
+    fig.update_layout(
+        title='Survival Analysis',
+        xaxis_title='Time',
+        yaxis_title='Survival Probability' if method == 'km' else 'Cumulative Hazard',
+        template='plotly_white',
+        hovermode='x unified',
+        showlegend=True
+    )
+    
+    return fig
+
+def generate_r_code(method='km', ci_method='plain', alpha=0.05):
+    """Generate equivalent R code"""
+    r_code = f"""# Load required libraries
+library(survival)
+library(survminer)
+
+# Read the data
+data <- read.csv("your_data.csv")
+
+# Fit the survival model
+surv_obj <- Surv(time = data$time, event = data$censored)
+"""
+    
+    if method == 'km':
+        r_code += f"""
+# Fit Kaplan-Meier model
+km_fit <- survfit(surv_obj ~ 1, conf.type = "{ci_method}", conf.int = {1-alpha})
+
+# Plot the survival curve
+ggsurvplot(km_fit,
+           data = data,
+           conf.int = TRUE,
+           risk.table = TRUE,
+           censor = TRUE)
+"""
+    else:
+        r_code += f"""
+# Fit Nelson-Aalen model
+na_fit <- survfit(surv_obj ~ 1, type = "fleming-harrington", conf.int = {1-alpha})
+
+# Plot the cumulative hazard
+ggsurvplot(na_fit,
+           data = data,
+           conf.int = TRUE,
+           risk.table = TRUE,
+           censor = TRUE,
+           fun = "cumhaz")
+"""
+    
+    return r_code
 
 def main():
-    # Apply custom CSS
     local_css()
     
     # Sidebar
     with st.sidebar:
-        st.header("Analysis Settings")
+        st.title("Survival Analysis")
         
+        # File upload
         uploaded_file = st.file_uploader(
-            "Upload your CSV file",
+            "Upload CSV file",
             type=['csv'],
-            help="File should contain columns: time, event"
+            help="Upload a CSV file with 'time' and 'censored' columns"
         )
         
-        if uploaded_file is not None:
-            data = pd.read_csv(uploaded_file)
-            
-            time_col = st.selectbox(
-                "Select time column",
-                data.columns
+        # Method selection
+        method = st.selectbox(
+            "Estimation Method",
+            ["Kaplan-Meier (KM)", "Nelson-Aalen (NA)"],
+            help="Choose the survival estimation method"
+        )
+        
+        # CI method selection (only for KM for now)
+        if method == "Kaplan-Meier (KM)":
+            ci_method = st.selectbox(
+                "Confidence Interval Method",
+                ["Plain", "Arcsine", "Delta method"],
+                help="Choose the method for calculating confidence intervals"
             )
-            
-            event_col = st.selectbox(
-                "Select event column",
-                data.columns
-            )
-            
-            method = st.radio(
-                "Select estimation method",
-                ["Kaplan-Meier", "Nelson-Aalen"]
-            )
-            
-            alpha = st.slider(
-                "Confidence level (α)",
-                0.01, 0.20, 0.05
-            )
-            
-            plot_type = st.radio(
-                "Select plotting library",
-                ["Plotly", "ggplot"]
-            )
+        
+        # Alpha level
+        alpha = st.slider(
+            "Significance Level (α)",
+            min_value=0.01,
+            max_value=0.20,
+            value=0.05,
+            step=0.01,
+            help="Set the significance level for confidence intervals"
+        )
+        
+        # Footer
+        st.markdown(
+            "<div class='footer'>Copyright © 2023 Dhafer Malouche</div>",
+            unsafe_allow_html=True
+        )
     
-    # Main content
+    # Main panel
     tab1, tab2 = st.tabs(["Analysis", "About"])
     
     with tab1:
         if uploaded_file is not None:
-            try:
-                times = data[time_col].values
-                events = data[event_col].values
-                
-                is_na = method == "Nelson-Aalen"
-                if is_na:
-                    fitter = NelsonAalenFitter()
-                else:
-                    fitter = KaplanMeierFitter()
-                
-                # Fit with the selected alpha
-                fitter.fit(times, events, alpha=alpha)
-                
-                # Plot
-                if plot_type == "Plotly":
-                    fig = plot_survival_plotly(fitter, times, events, is_na)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    fig = plot_survival_ggplot(fitter, times, events, is_na)
-                    st.pyplot(gg.ggplot.draw(fig))
-                
-                # Show table with estimates and CIs
-                st.subheader("Survival Estimates with Confidence Intervals")
-                table = get_estimate_table(fitter, is_na)
-                st.dataframe(table.style.format({
-                    'Time': '{:.2f}',
-                    'Survival': '{:.3f}',
-                    'CI Lower': '{:.3f}',
-                    'CI Upper': '{:.3f}'
-                }))
-                
-                # Generate and show R code
-                st.subheader("Equivalent R Code")
-                r_code = get_equivalent_r_code(method, data, time_col, event_col)
-                st.code(r_code, language='r')
+            df = pd.read_csv(uploaded_file)
             
-            except Exception as e:
-                st.error(f"Error in analysis: {str(e)}")
-                st.info("Please check your data format and selected columns.")
+            # Validate data
+            is_valid, message = validate_data(df)
+            
+            if is_valid:
+                # Display the plot
+                fig = plot_survival_curve(
+                    df,
+                    method='km' if 'KM' in method else 'na',
+                    ci_method=ci_method.lower() if 'KM' in method else 'plain',
+                    alpha=alpha
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display data table
+                st.subheader("Analysis Results")
+                if 'KM' in method:
+                    kmf = KaplanMeierFitter()
+                    kmf.fit(df['time'], df['censored'], alpha=alpha)
+                    results = pd.DataFrame({
+                        'time': kmf.timeline,
+                        'estimate': kmf.survival_function_.values.flatten(),
+                        'std': np.sqrt(kmf.variance_),
+                        'ci_lower': kmf.confidence_interval_.values[:, 0],
+                        'ci_upper': kmf.confidence_interval_.values[:, 1]
+                    })
+                else:
+                    naf = NelsonAalenFitter()
+                    naf.fit(df['time'], df['censored'], alpha=alpha)
+                    results = pd.DataFrame({
+                        'time': naf.timeline,
+                        'estimate': naf.cumulative_hazard_.values.flatten(),
+                        'std': np.sqrt(naf.variance_),
+                        'ci_lower': naf.confidence_interval_.values[:, 0],
+                        'ci_upper': naf.confidence_interval_.values[:, 1]
+                    })
+                st.dataframe(results)
+                
+                # R code generation
+                if st.button("Show R Code"):
+                    r_code = generate_r_code(
+                        method='km' if 'KM' in method else 'na',
+                        ci_method=ci_method.lower() if 'KM' in method else 'plain',
+                        alpha=alpha
+                    )
+                    st.code(r_code, language='r')
+            else:
+                st.error(message)
     
     with tab2:
         st.header("About")
         
+        # Contact information
+        st.subheader("Contact Information")
         st.markdown("""
-        ### Contact Information
-        **Dhafer Malouche**  
-        Professor of Statistics  
-        Department of Mathematics and Statistics  
-        College of Arts and Sciences  
-        Qatar University
-        
-        **Email:** [dhafer.malouche@qu.edu.qa](mailto:dhafer.malouche@qu.edu.qa)  
-        **Website:** [dhafermalouche.net](http://dhafermalouche.net)
+            **Name:** Dhafer Malouche  
+            **Title:** Professor of Statistics  
+            **Department:** Mathematics and Statistics  
+            **Institution:** College of Arts and Sciences, Qatar University  
+            **Email:** [dhafer.malouche@qu.edu.qa](mailto:dhafer.malouche@qu.edu.qa)  
+            **Website:** [dhafermalouche.net](http://dhafermalouche.net)
         """)
         
-        st.subheader("Send Comments")
-        with st.form("comment_form"):
-            comment = st.text_area("Your comments")
-            email = st.text_input("Your email")
-            submit = st.form_submit_button("Submit")
-            if submit:
-                st.success("Thank you for your feedback!")
-    
-    # Copyright footer
-    st.markdown("""
-        <footer>
-            © 2024 Dhafer Malouche
-        </footer>
-    """, unsafe_allow_html=True)
+        # Feedback form
+        st.subheader("Feedback")
+        feedback = st.text_area(
+            "Please share your comments, suggestions, or questions:",
+            height=150
+        )
+        if st.button("Submit Feedback"):
+            st.success("Thank you for your feedback!")
 
 if __name__ == '__main__':
     main()
