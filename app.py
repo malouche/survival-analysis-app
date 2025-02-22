@@ -56,7 +56,7 @@ def local_css():
     st.markdown(css, unsafe_allow_html=True)
 
 # Rest of the plotting functions remain the same...
-[Previous plotting and helper functions]
+# TODO: Implement plotting and helper functions
 
 def main():
     # Apply custom CSS
