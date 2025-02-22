@@ -6,10 +6,6 @@ import plotly.graph_objects as go
 import bokeh.plotting as bkp
 from bokeh.models import ColumnDataSource
 import plotnine as gg
-import rpy2.robjects as robjects
-from rpy2.robjects import pandas2ri
-import base64
-from io import StringIO
 
 # Configure the page
 st.set_page_config(
@@ -17,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS
+# Custom CSS remains the same
 def local_css():
     st.markdown("""
         <style>
@@ -211,26 +207,61 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
     
     return plot
 
-def generate_r_code(method, ci_method):
-    r_code = """
+def get_equivalent_r_code(method, ci_method, variables):
+    """Generate equivalent R code for the analysis"""
+    if method == "Kaplan-Meier":
+        r_code = f"""# Equivalent R code for Kaplan-Meier estimation
 library(survival)
 library(survminer)
 
-# Read the data
-data <- read.csv('your_data.csv')
+# Read your data
+data <- read.csv("your_data.csv")
 
 # Fit the survival curve
-fit <- survfit(Surv(time, event) ~ 1, 
-               data = data,
-               conf.type = '{ci_method}')
+fit <- survfit(
+    Surv({variables['time']}, {variables['event']}) ~ 1,
+    data = data,
+    conf.type = "{ci_method.lower()}"
+)
 
-# Plot
-ggsurvplot(fit,
-           data = data,
-           conf.int = TRUE,
-           risk.table = TRUE,
-           censored = TRUE)
-""".format(ci_method=ci_method.lower())
+# Create the plot
+ggsurvplot(
+    fit,
+    data = data,
+    conf.int = TRUE,
+    risk.table = TRUE,
+    ggtheme = theme_minimal(),
+    xlab = "Time",
+    ylab = "Survival probability",
+    censor = TRUE
+)"""
+    else:  # Nelson-Aalen
+        r_code = f"""# Equivalent R code for Nelson-Aalen estimation
+library(survival)
+library(survminer)
+
+# Read your data
+data <- read.csv("your_data.csv")
+
+# Fit the Nelson-Aalen estimator
+fit <- survfit(
+    Surv({variables['time']}, {variables['event']}) ~ 1,
+    data = data,
+    type = "fh",  # Fleming-Harrington estimator (similar to Nelson-Aalen)
+    conf.type = "{ci_method.lower()}"
+)
+
+# Create the plot
+ggsurvplot(
+    fit,
+    data = data,
+    conf.int = TRUE,
+    risk.table = TRUE,
+    ggtheme = theme_minimal(),
+    xlab = "Time",
+    ylab = "Cumulative hazard",
+    censor = TRUE
+)"""
     
     return r_code
 
@@ -291,36 +322,45 @@ def main():
     
     with tab1:
         if uploaded_file is not None:
-            times = data[time_col].values
-            events = data[event_col].values
-            
-            if method == "Kaplan-Meier":
-                fitter = KaplanMeierFitter()
-            else:
-                fitter = NelsonAalenFitter()
-            
-            fitter.fit(times, events, alpha=alpha)
-            
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                if plot_type == "Plotly":
-                    fig = plot_survival_plotly(fitter, times, events)
-                    st.plotly_chart(fig, use_container_width=True)
-                elif plot_type == "Bokeh":
-                    fig = plot_survival_bokeh(fitter, times, events)
-                    st.bokeh_chart(fig, use_container_width=True)
-                else:
-                    fig = plot_survival_ggplot(fitter, times, events)
-                    st.pyplot(gg.ggplot.draw(fig))
-            
-            with col2:
-                st.subheader("Survival Table")
-                st.dataframe(fitter.survival_function_)
+            try:
+                times = data[time_col].values
+                events = data[event_col].values
                 
-                if st.button("Show R code"):
-                    r_code = generate_r_code(method, ci_method)
-                    st.code(r_code, language='r')
+                if method == "Kaplan-Meier":
+                    fitter = KaplanMeierFitter()
+                else:
+                    fitter = NelsonAalenFitter()
+                
+                fitter.fit(times, events, alpha=alpha)
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    if plot_type == "Plotly":
+                        fig = plot_survival_plotly(fitter, times, events)
+                        st.plotly_chart(fig, use_container_width=True)
+                    elif plot_type == "Bokeh":
+                        fig = plot_survival_bokeh(fitter, times, events)
+                        st.bokeh_chart(fig, use_container_width=True)
+                    else:
+                        fig = plot_survival_ggplot(fitter, times, events)
+                        st.pyplot(gg.ggplot.draw(fig))
+                
+                with col2:
+                    st.subheader("Survival Table")
+                    st.dataframe(fitter.survival_function_)
+                    
+                    if st.button("Show equivalent R code"):
+                        variables = {
+                            'time': time_col,
+                            'event': event_col
+                        }
+                        r_code = get_equivalent_r_code(method, ci_method, variables)
+                        st.code(r_code, language='r')
+            
+            except Exception as e:
+                st.error(f"Error in analysis: {str(e)}")
+                st.info("Please check your data format and selected columns.")
     
     with tab2:
         st.header("About")
@@ -342,7 +382,6 @@ def main():
         email = st.text_input("Your email")
         
         if st.button("Submit"):
-            # Here you would implement the logic to send the comment
             st.success("Thank you for your feedback!")
     
     # Copyright footer
