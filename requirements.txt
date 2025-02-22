@@ -1,4 +1,8 @@
-streamlit>=1.24.0
-numpy>=1.24.0
-pandas>=2.0.0
-plotly>=5.13.0
+streamlit>=1.31.0
+pandas>=2.2.0
+numpy>=1.26.0
+lifelines>=0.27.8
+plotly>=5.18.0
+bokeh>=3.3.0
+plotnine>=0.12.4
+rpy2>=3.5.15
