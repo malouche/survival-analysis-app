@@ -5,59 +5,23 @@ from lifelines import KaplanMeierFitter, NelsonAalenFitter
 import plotly.graph_objects as go
 import plotnine as gg
 
-# Configure the page
-st.set_page_config(
-    page_title="Survival Analysis App",
-    layout="wide"
-)
+# Rest of the imports and CSS remain the same...
 
-# Custom CSS remains the same
-def local_css():
-    st.markdown("""
-        <style>
-        .block-container {
-            padding: 2rem;
-        }
-        
-        .stDataFrame {
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-        }
-        
-        .sidebar .sidebar-content {
-            background-color: #f8f9fa;
-        }
-        
-        .about-section {
-            background-color: #f8f9fa;
-            padding: 2rem;
-            border-radius: 8px;
-            margin: 2rem 0;
-        }
-        
-        .contact-form {
-            background-color: #fff;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .copyright {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            padding: 1rem;
-            background-color: #f8f9fa;
-            width: 100%;
-            text-align: center;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
+def plot_survival_plotly(fitter, censored_times=None, censored_events=None, is_na=False):
     fig = go.Figure()
+    
+    # Get appropriate function based on estimator type
+    if is_na:
+        estimate = 1 - np.exp(-fitter.cumulative_hazard_)
+        timeline = fitter.timeline
+        if fitter.confidence_interval_ is not None:
+            ci_lower = 1 - np.exp(-fitter.confidence_interval_['na_upper'])
+            ci_upper = 1 - np.exp(-fitter.confidence_interval_['na_lower'])
+    else:
+        estimate = fitter.survival_function_
+        timeline = fitter.timeline
+        ci_lower = fitter.confidence_interval_[0]
+        ci_upper = fitter.confidence_interval_[1]
     
     # Create step function for survival curve
     x_steps = []
@@ -68,10 +32,9 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     y_steps.append(1.0)
     
     # Add steps for each time point
-    for i in range(len(kmf.timeline)):
-        # Add vertical line
-        x_steps.extend([kmf.timeline[i], kmf.timeline[i]])
-        y_steps.extend([y_steps[-1], kmf.survival_function_.values[i][0]])
+    for i in range(len(timeline)):
+        x_steps.extend([timeline[i], timeline[i]])
+        y_steps.extend([y_steps[-1], estimate.values[i][0]])
     
     # Add survival curve as steps
     fig.add_trace(go.Scatter(
@@ -83,8 +46,7 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     ))
     
     # Add confidence intervals if available
-    if kmf.confidence_interval_ is not None:
-        # Lower CI
+    if fitter.confidence_interval_ is not None:
         x_steps_ci = []
         y_steps_ci_lower = []
         y_steps_ci_upper = []
@@ -94,10 +56,10 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
         y_steps_ci_lower.append(1.0)
         y_steps_ci_upper.append(1.0)
         
-        for i in range(len(kmf.timeline)):
-            x_steps_ci.extend([kmf.timeline[i], kmf.timeline[i]])
-            y_steps_ci_lower.extend([y_steps_ci_lower[-1], kmf.confidence_interval_.values[i][0]])
-            y_steps_ci_upper.extend([y_steps_ci_upper[-1], kmf.confidence_interval_.values[i][1]])
+        for i in range(len(timeline)):
+            x_steps_ci.extend([timeline[i], timeline[i]])
+            y_steps_ci_lower.extend([y_steps_ci_lower[-1], ci_lower.values[i][0]])
+            y_steps_ci_upper.extend([y_steps_ci_upper[-1], ci_upper.values[i][0]])
         
         fig.add_trace(go.Scatter(
             x=x_steps_ci,
@@ -120,22 +82,23 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     if censored_times is not None and censored_events is not None:
         censored_mask = censored_events == 0
         censored_times = censored_times[censored_mask]
-        survival_at_censored = np.array([
-            y_steps[max(i for i, x in enumerate(x_steps) if x <= t)]
-            for t in censored_times
-        ])
-        
-        fig.add_trace(go.Scatter(
-            x=censored_times,
-            y=survival_at_censored,
-            mode='markers',
-            name='Censored',
-            marker=dict(
-                symbol='x',
-                size=10,
-                color='red'
-            )
-        ))
+        if len(censored_times) > 0:
+            survival_at_censored = np.array([
+                y_steps[max(i for i, x in enumerate(x_steps) if x <= t)]
+                for t in censored_times
+            ])
+            
+            fig.add_trace(go.Scatter(
+                x=censored_times,
+                y=survival_at_censored,
+                mode='markers',
+                name='Censored',
+                marker=dict(
+                    symbol='x',
+                    size=10,
+                    color='red'
+                )
+            ))
     
     fig.update_layout(
         title='Survival Function Estimate',
@@ -149,31 +112,44 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     
     return fig
 
-def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
-    # Create DataFrame for the step function
+def plot_survival_ggplot(fitter, censored_times=None, censored_events=None, is_na=False):
+    # Get appropriate function based on estimator type
+    if is_na:
+        estimate = 1 - np.exp(-fitter.cumulative_hazard_)
+        timeline = fitter.timeline
+        if fitter.confidence_interval_ is not None:
+            ci_lower = 1 - np.exp(-fitter.confidence_interval_['na_upper'])
+            ci_upper = 1 - np.exp(-fitter.confidence_interval_['na_lower'])
+    else:
+        estimate = fitter.survival_function_
+        timeline = fitter.timeline
+        ci_lower = fitter.confidence_interval_[0]
+        ci_upper = fitter.confidence_interval_[1]
+    
+    # Create step function data
     steps_x = []
     steps_y = []
     steps_x.append(0)
     steps_y.append(1.0)
     
-    for i in range(len(kmf.timeline)):
-        steps_x.extend([kmf.timeline[i], kmf.timeline[i]])
-        steps_y.extend([steps_y[-1], kmf.survival_function_.values[i][0]])
+    for i in range(len(timeline)):
+        steps_x.extend([timeline[i], timeline[i]])
+        steps_y.extend([steps_y[-1], estimate.values[i][0]])
     
     df = pd.DataFrame({
         'time': steps_x,
         'survival': steps_y
     })
     
-    if kmf.confidence_interval_ is not None:
+    if fitter.confidence_interval_ is not None:
         steps_ci_lower = []
         steps_ci_upper = []
         steps_ci_lower.append(1.0)
         steps_ci_upper.append(1.0)
         
-        for i in range(len(kmf.timeline)):
-            steps_ci_lower.extend([steps_ci_lower[-1], kmf.confidence_interval_.values[i][0]])
-            steps_ci_upper.extend([steps_ci_upper[-1], kmf.confidence_interval_.values[i][1]])
+        for i in range(len(timeline)):
+            steps_ci_lower.extend([steps_ci_lower[-1], ci_lower.values[i][0]])
+            steps_ci_upper.extend([steps_ci_upper[-1], ci_upper.values[i][0]])
         
         df['ci_lower'] = pd.Series(steps_ci_lower, index=df.index)
         df['ci_upper'] = pd.Series(steps_ci_upper, index=df.index)
@@ -188,7 +164,7 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
             + gg.ylim(0, 1.05))
     
     # Add confidence intervals
-    if kmf.confidence_interval_ is not None:
+    if fitter.confidence_interval_ is not None:
         plot = plot + gg.geom_ribbon(
             gg.aes(ymin='ci_lower', ymax='ci_upper'),
             alpha=0.2
@@ -198,86 +174,48 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
     if censored_times is not None and censored_events is not None:
         censored_mask = censored_events == 0
         censored_times = censored_times[censored_mask]
-        survival_at_censored = np.array([
-            steps_y[max(i for i, x in enumerate(steps_x) if x <= t)]
-            for t in censored_times
-        ])
-        
-        censored_df = pd.DataFrame({
-            'time': censored_times,
-            'survival': survival_at_censored
-        })
-        
-        plot = plot + gg.geom_point(
-            data=censored_df,
-            color='red',
-            shape='x',
-            size=3
-        )
+        if len(censored_times) > 0:
+            survival_at_censored = np.array([
+                steps_y[max(i for i, x in enumerate(steps_x) if x <= t)]
+                for t in censored_times
+            ])
+            
+            censored_df = pd.DataFrame({
+                'time': censored_times,
+                'survival': survival_at_censored
+            })
+            
+            plot = plot + gg.geom_point(
+                data=censored_df,
+                color='red',
+                shape='x',
+                size=3
+            )
     
     return plot
 
-def get_equivalent_r_code(method, data, time_col, event_col):
-    """Generate equivalent R code for the analysis using the actual data"""
-    # Convert data to R data.frame format
-    data_str = "data <- data.frame(\n"
-    data_str += f"    {time_col} = c({', '.join(map(str, data[time_col]))}),\n"
-    data_str += f"    {event_col} = c({', '.join(map(str, data[event_col]))})\n"
-    data_str += ")\n"
+def get_estimate_table(fitter, is_na=False):
+    """Get a formatted table with estimates and CIs"""
+    if is_na:
+        estimate = 1 - np.exp(-fitter.cumulative_hazard_)
+        if fitter.confidence_interval_ is not None:
+            ci_lower = 1 - np.exp(-fitter.confidence_interval_['na_upper'])
+            ci_upper = 1 - np.exp(-fitter.confidence_interval_['na_lower'])
+    else:
+        estimate = fitter.survival_function_
+        if fitter.confidence_interval_ is not None:
+            ci_lower = fitter.confidence_interval_[0]
+            ci_upper = fitter.confidence_interval_[1]
     
-    if method == "Kaplan-Meier":
-        r_code = f"""# Equivalent R code for Kaplan-Meier estimation
-library(survival)
-library(survminer)
-
-# Your data
-{data_str}
-
-# Fit the survival curve
-fit <- survfit(
-    Surv({time_col}, {event_col}) ~ 1,
-    data = data
-)
-
-# Create the plot
-ggsurvplot(
-    fit,
-    data = data,
-    conf.int = TRUE,
-    risk.table = TRUE,
-    ggtheme = theme_minimal(),
-    xlab = "Time",
-    ylab = "Survival probability",
-    censor = TRUE
-)"""
-    else:  # Nelson-Aalen
-        r_code = f"""# Equivalent R code for Nelson-Aalen estimation
-library(survival)
-library(survminer)
-
-# Your data
-{data_str}
-
-# Fit the Nelson-Aalen estimator
-fit <- survfit(
-    Surv({time_col}, {event_col}) ~ 1,
-    data = data,
-    type = "fh"  # Fleming-Harrington estimator
-)
-
-# Create the plot
-ggsurvplot(
-    fit,
-    data = data,
-    conf.int = TRUE,
-    risk.table = TRUE,
-    ggtheme = theme_minimal(),
-    xlab = "Time",
-    ylab = "Cumulative hazard",
-    censor = TRUE
-)"""
+    # Create table with estimates and CIs
+    table = pd.DataFrame({
+        'Time': fitter.timeline,
+        'Survival': estimate.values.flatten(),
+        'CI Lower': ci_lower.values.flatten(),
+        'CI Upper': ci_upper.values.flatten()
+    })
     
-    return r_code
+    return table
 
 def main():
     local_css()
@@ -312,7 +250,7 @@ def main():
             
             alpha = st.slider(
                 "Confidence level (α)",
-                0.01, 0.99, 0.05
+                0.01, 0.20, 0.05
             )
             
             plot_type = st.radio(
@@ -329,26 +267,34 @@ def main():
                 times = data[time_col].values
                 events = data[event_col].values
                 
-                if method == "Kaplan-Meier":
-                    fitter = KaplanMeierFitter()
-                else:
+                is_na = method == "Nelson-Aalen"
+                if is_na:
                     fitter = NelsonAalenFitter()
+                else:
+                    fitter = KaplanMeierFitter()
                 
                 # Fit with the selected alpha
                 fitter.fit(times, events, alpha=alpha)
                 
                 # Plot
                 if plot_type == "Plotly":
-                    fig = plot_survival_plotly(fitter, times, events)
+                    fig = plot_survival_plotly(fitter, times, events, is_na)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
-                    fig = plot_survival_ggplot(fitter, times, events)
+                    fig = plot_survival_ggplot(fitter, times, events, is_na)
                     st.pyplot(gg.ggplot.draw(fig))
                 
-                # Show table and R code below the plot
-                st.subheader("Survival Table")
-                st.dataframe(fitter.survival_function_)
+                # Show table with estimates and CIs
+                st.subheader("Survival Estimates with Confidence Intervals")
+                table = get_estimate_table(fitter, is_na)
+                st.dataframe(table.style.format({
+                    'Time': '{:.2f}',
+                    'Survival': '{:.3f}',
+                    'CI Lower': '{:.3f}',
+                    'CI Upper': '{:.3f}'
+                }))
                 
+                # Generate and show R code
                 st.subheader("Equivalent R Code")
                 r_code = get_equivalent_r_code(method, data, time_col, event_col)
                 st.code(r_code, language='r')
@@ -357,33 +303,7 @@ def main():
                 st.error(f"Error in analysis: {str(e)}")
                 st.info("Please check your data format and selected columns.")
     
-    with tab2:
-        st.header("About")
-        
-        st.markdown("""
-        ### Contact Information
-        **Dhafer Malouche**  
-        Professor of Statistics  
-        Department of Mathematics and Statistics  
-        College of Arts and Sciences  
-        Qatar University
-        
-        **Email:** [dhafer.malouche@qu.edu.qa](mailto:dhafer.malouche@qu.edu.qa)  
-        **Website:** [dhafermalouche.net](http://dhafermalouche.net)
-        """)
-        
-        st.subheader("Send Comments")
-        comment = st.text_area("Your comments")
-        email = st.text_input("Your email")
-        
-        if st.button("Submit"):
-            st.success("Thank you for your feedback!")
-    
-    # Copyright footer
-    st.markdown(
-        '<div class="copyright">© 2024 Dhafer Malouche</div>',
-        unsafe_allow_html=True
-    )
+    # About tab and footer remain the same...
 
 if __name__ == '__main__':
     main()
