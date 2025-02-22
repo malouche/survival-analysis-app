@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS
+# Custom CSS remains the same
 def local_css():
     st.markdown("""
         <style>
@@ -217,7 +217,7 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
     
     return plot
 
-def get_equivalent_r_code(method, ci_method, data, time_col, event_col):
+def get_equivalent_r_code(method, data, time_col, event_col):
     """Generate equivalent R code for the analysis using the actual data"""
     # Convert data to R data.frame format
     data_str = "data <- data.frame(\n"
@@ -236,8 +236,7 @@ library(survminer)
 # Fit the survival curve
 fit <- survfit(
     Surv({time_col}, {event_col}) ~ 1,
-    data = data,
-    conf.type = "{ci_method.lower()}"
+    data = data
 )
 
 # Create the plot
@@ -263,8 +262,7 @@ library(survminer)
 fit <- survfit(
     Surv({time_col}, {event_col}) ~ 1,
     data = data,
-    type = "fh",  # Fleming-Harrington estimator
-    conf.type = "{ci_method.lower()}"
+    type = "fh"  # Fleming-Harrington estimator
 )
 
 # Create the plot
@@ -317,17 +315,6 @@ def main():
                 0.01, 0.99, 0.05
             )
             
-            if method == "Kaplan-Meier":
-                ci_method = st.selectbox(
-                    "Confidence interval method",
-                    ["Plain", "Arcsine", "Delta", "Bootstrap"]
-                )
-            else:
-                ci_method = st.selectbox(
-                    "Confidence interval method",
-                    ["Plain", "Delta"]
-                )
-            
             plot_type = st.radio(
                 "Select plotting library",
                 ["Plotly", "ggplot"]
@@ -347,11 +334,8 @@ def main():
                 else:
                     fitter = NelsonAalenFitter()
                 
-                # Fit with the selected CI method
-                if ci_method == "Bootstrap":
-                    fitter.fit(times, events, alpha=alpha, ci_method=ci_method, n_bootstrap_samples=1000)
-                else:
-                    fitter.fit(times, events, alpha=alpha, ci_method=ci_method)
+                # Fit with the selected alpha
+                fitter.fit(times, events, alpha=alpha)
                 
                 # Plot
                 if plot_type == "Plotly":
@@ -366,7 +350,7 @@ def main():
                 st.dataframe(fitter.survival_function_)
                 
                 st.subheader("Equivalent R Code")
-                r_code = get_equivalent_r_code(method, ci_method, data, time_col, event_col)
+                r_code = get_equivalent_r_code(method, data, time_col, event_col)
                 st.code(r_code, language='r')
             
             except Exception as e:
