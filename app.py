@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 from lifelines import KaplanMeierFitter, NelsonAalenFitter
 import plotly.graph_objects as go
-import bokeh.plotting as bkp
-from bokeh.models import ColumnDataSource
 import plotnine as gg
 
 # Configure the page
@@ -61,27 +59,57 @@ def local_css():
 def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     fig = go.Figure()
     
-    # Add survival curve
+    # Create step function for survival curve
+    x_steps = []
+    y_steps = []
+    
+    # Start at time 0 with survival 1
+    x_steps.append(0)
+    y_steps.append(1.0)
+    
+    # Add steps for each time point
+    for i in range(len(kmf.timeline)):
+        # Add vertical line
+        x_steps.extend([kmf.timeline[i], kmf.timeline[i]])
+        y_steps.extend([y_steps[-1], kmf.survival_function_.values[i][0]])
+    
+    # Add survival curve as steps
     fig.add_trace(go.Scatter(
-        x=kmf.timeline,
-        y=kmf.survival_function_.values.flatten(),
+        x=x_steps,
+        y=y_steps,
         mode='lines',
         name='Survival Estimate',
-        line=dict(color='blue')
+        line=dict(color='blue', width=2)
     ))
     
-    # Add confidence intervals
+    # Add confidence intervals if available
     if kmf.confidence_interval_ is not None:
+        # Lower CI
+        x_steps_ci = []
+        y_steps_ci_lower = []
+        y_steps_ci_upper = []
+        
+        # Start at time 0
+        x_steps_ci.append(0)
+        y_steps_ci_lower.append(1.0)
+        y_steps_ci_upper.append(1.0)
+        
+        for i in range(len(kmf.timeline)):
+            x_steps_ci.extend([kmf.timeline[i], kmf.timeline[i]])
+            y_steps_ci_lower.extend([y_steps_ci_lower[-1], kmf.confidence_interval_.values[i][0]])
+            y_steps_ci_upper.extend([y_steps_ci_upper[-1], kmf.confidence_interval_.values[i][1]])
+        
         fig.add_trace(go.Scatter(
-            x=kmf.timeline,
-            y=kmf.confidence_interval_.values[:, 0],
+            x=x_steps_ci,
+            y=y_steps_ci_lower,
             mode='lines',
             line=dict(width=0),
             showlegend=False
         ))
+        
         fig.add_trace(go.Scatter(
-            x=kmf.timeline,
-            y=kmf.confidence_interval_.values[:, 1],
+            x=x_steps_ci,
+            y=y_steps_ci_upper,
             mode='lines',
             fill='tonexty',
             name='95% CI',
@@ -92,9 +120,10 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
     if censored_times is not None and censored_events is not None:
         censored_mask = censored_events == 0
         censored_times = censored_times[censored_mask]
-        survival_at_censored = np.interp(censored_times, 
-                                       kmf.timeline,
-                                       kmf.survival_function_.values.flatten())
+        survival_at_censored = np.array([
+            y_steps[max(i for i, x in enumerate(x_steps) if x <= t)]
+            for t in censored_times
+        ])
         
         fig.add_trace(go.Scatter(
             x=censored_times,
@@ -102,7 +131,7 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
             mode='markers',
             name='Censored',
             marker=dict(
-                symbol='cross',
+                symbol='x',
                 size=10,
                 color='red'
             )
@@ -112,72 +141,51 @@ def plot_survival_plotly(kmf, censored_times=None, censored_events=None):
         title='Survival Function Estimate',
         xaxis_title='Time',
         yaxis_title='Survival Probability',
-        template='plotly_white'
+        yaxis_range=[0, 1.05],
+        template='plotly_white',
+        width=800,
+        height=500
     )
     
     return fig
 
-def plot_survival_bokeh(kmf, censored_times=None, censored_events=None):
-    p = bkp.figure(title='Survival Function Estimate',
-                   x_axis_label='Time',
-                   y_axis_label='Survival Probability')
-    
-    # Add survival curve
-    source = ColumnDataSource({
-        'x': kmf.timeline,
-        'y': kmf.survival_function_.values.flatten()
-    })
-    p.line('x', 'y', line_color='blue', legend_label='Survival Estimate', source=source)
-    
-    # Add confidence intervals
-    if kmf.confidence_interval_ is not None:
-        p.patch(
-            x=np.concatenate([kmf.timeline, kmf.timeline[::-1]]),
-            y=np.concatenate([
-                kmf.confidence_interval_.values[:, 0],
-                kmf.confidence_interval_.values[::-1, 1]
-            ]),
-            alpha=0.2,
-            color='blue',
-            legend_label='95% CI'
-        )
-    
-    # Add censored points
-    if censored_times is not None and censored_events is not None:
-        censored_mask = censored_events == 0
-        censored_times = censored_times[censored_mask]
-        survival_at_censored = np.interp(censored_times,
-                                       kmf.timeline,
-                                       kmf.survival_function_.values.flatten())
-        
-        p.scatter(censored_times,
-                 survival_at_censored,
-                 color='red',
-                 marker='cross',
-                 size=10,
-                 legend_label='Censored')
-    
-    p.legend.location = "top_right"
-    return p
-
 def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
-    # Create DataFrame for ggplot
+    # Create DataFrame for the step function
+    steps_x = []
+    steps_y = []
+    steps_x.append(0)
+    steps_y.append(1.0)
+    
+    for i in range(len(kmf.timeline)):
+        steps_x.extend([kmf.timeline[i], kmf.timeline[i]])
+        steps_y.extend([steps_y[-1], kmf.survival_function_.values[i][0]])
+    
     df = pd.DataFrame({
-        'time': kmf.timeline,
-        'survival': kmf.survival_function_.values.flatten()
+        'time': steps_x,
+        'survival': steps_y
     })
     
     if kmf.confidence_interval_ is not None:
-        df['ci_lower'] = kmf.confidence_interval_.values[:, 0]
-        df['ci_upper'] = kmf.confidence_interval_.values[:, 1]
+        steps_ci_lower = []
+        steps_ci_upper = []
+        steps_ci_lower.append(1.0)
+        steps_ci_upper.append(1.0)
+        
+        for i in range(len(kmf.timeline)):
+            steps_ci_lower.extend([steps_ci_lower[-1], kmf.confidence_interval_.values[i][0]])
+            steps_ci_upper.extend([steps_ci_upper[-1], kmf.confidence_interval_.values[i][1]])
+        
+        df['ci_lower'] = pd.Series(steps_ci_lower, index=df.index)
+        df['ci_upper'] = pd.Series(steps_ci_upper, index=df.index)
     
     # Base plot
     plot = (gg.ggplot(df, gg.aes(x='time', y='survival'))
-            + gg.geom_line(color='blue')
+            + gg.geom_step(color='blue')
             + gg.labs(title='Survival Function Estimate',
                      x='Time',
                      y='Survival Probability')
-            + gg.theme_minimal())
+            + gg.theme_minimal()
+            + gg.ylim(0, 1.05))
     
     # Add confidence intervals
     if kmf.confidence_interval_ is not None:
@@ -190,9 +198,10 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
     if censored_times is not None and censored_events is not None:
         censored_mask = censored_events == 0
         censored_times = censored_times[censored_mask]
-        survival_at_censored = np.interp(censored_times,
-                                       kmf.timeline,
-                                       kmf.survival_function_.values.flatten())
+        survival_at_censored = np.array([
+            steps_y[max(i for i, x in enumerate(steps_x) if x <= t)]
+            for t in censored_times
+        ])
         
         censored_df = pd.DataFrame({
             'time': censored_times,
@@ -202,24 +211,31 @@ def plot_survival_ggplot(kmf, censored_times=None, censored_events=None):
         plot = plot + gg.geom_point(
             data=censored_df,
             color='red',
-            shape='x'
+            shape='x',
+            size=3
         )
     
     return plot
 
-def get_equivalent_r_code(method, ci_method, variables):
-    """Generate equivalent R code for the analysis"""
+def get_equivalent_r_code(method, ci_method, data, time_col, event_col):
+    """Generate equivalent R code for the analysis using the actual data"""
+    # Convert data to R data.frame format
+    data_str = "data <- data.frame(\n"
+    data_str += f"    {time_col} = c({', '.join(map(str, data[time_col]))}),\n"
+    data_str += f"    {event_col} = c({', '.join(map(str, data[event_col]))})\n"
+    data_str += ")\n"
+    
     if method == "Kaplan-Meier":
         r_code = f"""# Equivalent R code for Kaplan-Meier estimation
 library(survival)
 library(survminer)
 
-# Read your data
-data <- read.csv("your_data.csv")
+# Your data
+{data_str}
 
 # Fit the survival curve
 fit <- survfit(
-    Surv({variables['time']}, {variables['event']}) ~ 1,
+    Surv({time_col}, {event_col}) ~ 1,
     data = data,
     conf.type = "{ci_method.lower()}"
 )
@@ -240,14 +256,14 @@ ggsurvplot(
 library(survival)
 library(survminer)
 
-# Read your data
-data <- read.csv("your_data.csv")
+# Your data
+{data_str}
 
 # Fit the Nelson-Aalen estimator
 fit <- survfit(
-    Surv({variables['time']}, {variables['event']}) ~ 1,
+    Surv({time_col}, {event_col}) ~ 1,
     data = data,
-    type = "fh",  # Fleming-Harrington estimator (similar to Nelson-Aalen)
+    type = "fh",  # Fleming-Harrington estimator
     conf.type = "{ci_method.lower()}"
 )
 
@@ -314,7 +330,7 @@ def main():
             
             plot_type = st.radio(
                 "Select plotting library",
-                ["Plotly", "Bokeh", "ggplot"]
+                ["Plotly", "ggplot"]
             )
     
     # Main content
@@ -331,32 +347,27 @@ def main():
                 else:
                     fitter = NelsonAalenFitter()
                 
-                fitter.fit(times, events, alpha=alpha)
+                # Fit with the selected CI method
+                if ci_method == "Bootstrap":
+                    fitter.fit(times, events, alpha=alpha, ci_method=ci_method, n_bootstrap_samples=1000)
+                else:
+                    fitter.fit(times, events, alpha=alpha, ci_method=ci_method)
                 
-                col1, col2 = st.columns([2, 1])
+                # Plot
+                if plot_type == "Plotly":
+                    fig = plot_survival_plotly(fitter, times, events)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    fig = plot_survival_ggplot(fitter, times, events)
+                    st.pyplot(gg.ggplot.draw(fig))
                 
-                with col1:
-                    if plot_type == "Plotly":
-                        fig = plot_survival_plotly(fitter, times, events)
-                        st.plotly_chart(fig, use_container_width=True)
-                    elif plot_type == "Bokeh":
-                        fig = plot_survival_bokeh(fitter, times, events)
-                        st.bokeh_chart(fig, use_container_width=True)
-                    else:
-                        fig = plot_survival_ggplot(fitter, times, events)
-                        st.pyplot(gg.ggplot.draw(fig))
+                # Show table and R code below the plot
+                st.subheader("Survival Table")
+                st.dataframe(fitter.survival_function_)
                 
-                with col2:
-                    st.subheader("Survival Table")
-                    st.dataframe(fitter.survival_function_)
-                    
-                    if st.button("Show equivalent R code"):
-                        variables = {
-                            'time': time_col,
-                            'event': event_col
-                        }
-                        r_code = get_equivalent_r_code(method, ci_method, variables)
-                        st.code(r_code, language='r')
+                st.subheader("Equivalent R Code")
+                r_code = get_equivalent_r_code(method, ci_method, data, time_col, event_col)
+                st.code(r_code, language='r')
             
             except Exception as e:
                 st.error(f"Error in analysis: {str(e)}")
