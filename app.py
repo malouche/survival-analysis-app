@@ -7,6 +7,7 @@ from code_generator import generate_python_code, generate_r_code
 from table_utils import display_interactive_table
 from about import show_about
 from feedback import show_feedback
+from guide import show_guide, show_warning
 
 # Custom CSS for styling
 st.markdown(
@@ -77,7 +78,7 @@ if st.sidebar.button("Calculate"):
         combined_results = combine_estimates(km_results, na_results)
         
         # Create main tabs
-        tabs = st.tabs(["Plots", "Results", "Input Data", "Code", "About Me", "Feedback"])
+        tabs = st.tabs(["Plots", "Results", "Input Data", "Code", "About", "Feedback"])
         
         with tabs[0]:
             plot_methods = selected_methods.copy()
@@ -125,6 +126,8 @@ if st.sidebar.button("Calculate"):
         
          
         with tabs[4]:
+            show_guide()
+            show_warning()
             show_about()
             
         with tabs[5]:
