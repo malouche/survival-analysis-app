@@ -110,11 +110,10 @@ print(surv_est)
 
         with tabs[5]:
             st.header("About Me")
-            st.write("**Name:** Dhafer Malouche")
-            st.write("**Title:** Professor of Statistics")
-            st.write("**Department:** Mathematics and Statistics")
-            st.write("**Institution:** College of Arts and Sciences, Qatar University")
-            st.write("**Email:** dhafer.malouche@qu.edu.qa")
+            st.write("** Dhafer Malouche, Professor of Statistics**")
+            st.write("**Department of  Mathematics and Statistics**")
+            st.write("**College of Arts and Sciences, Qatar University**")
+            st.write("**Email:** [dhafer.malouche@qu.edu.qa](mailto:dhafer.malouche@qu.edu.qa)")
             st.markdown("**Website:** [dhafermalouche.net](http://dhafermalouche.net)")
 
         with tabs[6]:
