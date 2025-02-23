@@ -1,22 +1,54 @@
 import matplotlib.pyplot as plt
-from plotly import graph_objs as go
 
-def plot_with_plotly(times, survival, ci_lower, ci_upper):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=times, y=survival, mode='lines', name='Survival'))
-    fig.add_trace(go.Scatter(x=times, y=ci_lower, mode='lines', name='CI Lower', line=dict(dash='dash')))
-    fig.add_trace(go.Scatter(x=times, y=ci_upper, mode='lines', name='CI Upper', line=dict(dash='dash')))
-    fig.update_layout(xaxis_title='Time', yaxis_title='Survival Probability')
+def create_survival_plot(times, data, method_name, show_ci=True):
+    """Create a single survival plot with confidence intervals."""
+    plt.style.use('seaborn-whitegrid')
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Set color based on method
+    color = 'blue' if method_name == 'Kaplan-Meier' else 'red'
+    
+    # Main survival curve
+    ax.step(times, data['estimate'], where='post', 
+            label=method_name, color=color)
+    
+    # Confidence intervals if requested
+    if show_ci:
+        ax.fill_between(times, data['ci_lower'], data['ci_upper'],
+                       step='post', alpha=0.2, color=color)
+    
+    # Customize the plot
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Survival Probability')
+    ax.set_title(f'{method_name} Survival Estimate')
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.05)
+    
+    # Add legend
+    ax.legend(loc='best')
+    
+    plt.tight_layout()
     return fig
 
-def plot_with_matplotlib(times, survival, ci_lower, ci_upper):
-    # Use a black-and-white theme similar to ggplot2's theme_bw
+def create_combined_plot(times, km_data=None, na_data=None):
+    """Create a combined plot of KM and NA estimates without CIs."""
     plt.style.use('seaborn-whitegrid')
-    fig, ax = plt.subplots()
-    ax.step(times, survival, where="post", label="Survival")
-    ax.step(times, ci_lower, where="post", linestyle='--', label="CI Lower")
-    ax.step(times, ci_upper, where="post", linestyle='--', label="CI Upper")
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Survival Probability")
-    ax.legend()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    if km_data is not None:
+        ax.step(times, km_data['estimate'], where='post', 
+                label='Kaplan-Meier', color='blue')
+    
+    if na_data is not None:
+        ax.step(times, na_data['estimate'], where='post', 
+                label='Nelson-Aalen', color='red')
+    
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Survival Probability')
+    ax.set_title('Combined Survival Estimates')
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.05)
+    ax.legend(loc='best')
+    
+    plt.tight_layout()
     return fig
