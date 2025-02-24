@@ -2,7 +2,15 @@ import matplotlib.pyplot as plt
 
 def create_survival_plot(times, data, method_name, show_ci=True):
     """Create a single survival plot with confidence intervals."""
-    plt.style.use('seaborn-whitegrid')
+    # Use a style that's compatible with newer matplotlib versions
+    try:
+        plt.style.use('seaborn-v0_8-whitegrid')  # For newer matplotlib versions
+    except:
+        try:
+            plt.style.use('seaborn-whitegrid')  # For older matplotlib versions
+        except:
+            pass  # Use default style if neither is available
+    
     fig, ax = plt.subplots(figsize=(10, 6))
     
     # Set color based on method
@@ -32,7 +40,15 @@ def create_survival_plot(times, data, method_name, show_ci=True):
 
 def create_combined_plot(times, km_data=None, na_data=None):
     """Create a combined plot of KM and NA estimates without CIs."""
-    plt.style.use('seaborn-whitegrid')
+    # Use a style that's compatible with newer matplotlib versions
+    try:
+        plt.style.use('seaborn-v0_8-whitegrid')  # For newer matplotlib versions
+    except:
+        try:
+            plt.style.use('seaborn-whitegrid')  # For older matplotlib versions
+        except:
+            pass  # Use default style if neither is available
+    
     fig, ax = plt.subplots(figsize=(10, 6))
     
     if km_data is not None:
